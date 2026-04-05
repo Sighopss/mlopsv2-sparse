@@ -1,63 +1,102 @@
 name: tf-gha-deploy-infra.yml
 
 on:
-  #push:
+  push:
   workflow_dispatch:
-env:
-  config_env: "none"
+
 jobs:
-  set-env-branch:
+  set-env:
     runs-on: ubuntu-latest
     outputs:
       config-file: ${{ steps.set-output-defaults.outputs.config-file }}
     steps:
       - id: set-prod-branch
-        name: set-prod-branch
-        if: ${{ github.ref == 'refs/heads/main'}}
-        run: echo "config_env=config-infra-prod.yml" >> $GITHUB_ENV;
+        name: Set prod branch
+        if: ${{ github.ref == 'refs/heads/main' }}
+        run: echo "config_env=config-infra-prod.yml" >> "$GITHUB_ENV"
+
       - id: set-dev-branch
-        name: setdevbranch
-        if: ${{ github.ref != 'refs/heads/main'}}
-        run: echo "config_env=config-infra-dev.yml" >> $GITHUB_ENV;
+        name: Set dev branch
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: echo "config_env=config-infra-dev.yml" >> "$GITHUB_ENV"
+
       - id: set-output-defaults
-        name: set-output-defaults
-        run: |
-          echo "config-file=$config_env" >> $GITHUB_OUTPUT;
-  get-config:
-    needs: set-env-branch
-    uses: Azure/mlops-templates/.github/workflows/read-yaml.yml@main
-    with:
-      file_name: ${{ needs.set-env-branch.outputs.config-file}}
-  test-terraform-state-deployment:
-    needs: [get-config, set-env-branch]
-    uses: Azure/mlops-templates/.github/workflows/tf-gha-install-terraform.yml@main
-    with:
-      TFAction: "apply"
-      dply_environment: ${{ needs.set-env-branch.outputs.config-file }}
-      location: ${{ needs.get-config.outputs.location }}
-      namespace: ${{ needs.get-config.outputs.namespace }}
-      postfix: ${{ needs.get-config.outputs.postfix }}
-      environment: ${{ needs.get-config.outputs.environment }}
-      enable_aml_computecluster: ${{ needs.get-config.outputs.enable_aml_computecluster == true }} ## TODO review the evaluation of boolean
-      enable_monitoring: ${{ needs.get-config.outputs.enable_monitoring == true  }} ## TODO review the evaluation of boolean
-      terraform_version: ${{ needs.get-config.outputs.terraform_version }}
-      terraform_workingdir: ${{ needs.get-config.outputs.terraform_workingdir }}
-      terraform_st_location: ${{ needs.get-config.outputs.terraform_st_location }}
-      terraform_st_storage_account: ${{ needs.get-config.outputs.terraform_st_storage_account }}
-      terraform_st_resource_group: ${{ needs.get-config.outputs.terraform_st_resource_group }}
-      terraform_st_container_name: ${{ needs.get-config.outputs.terraform_st_container_name }}
-      terraform_st_key: ${{ needs.get-config.outputs.terraform_st_key }}
-      terraform_plan_location: ${{ needs.get-config.outputs.location }}
-      terraform_plan_vnet: "TBD" # TBD
-    secrets:
-      azure_creds: ${{ secrets.AZURE_CREDENTIALS }}
-      clientId: ${{ secrets.ARM_CLIENT_ID }}
-      clientSecret: ${{ secrets.ARM_CLIENT_SECRET }}
-      subscriptionId: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-      tenantId: ${{ secrets.ARM_TENANT_ID }}
-  deploy-azureml-resources:
+        name: Set output defaults
+        run: echo "config-file=$config_env" >> "$GITHUB_OUTPUT"
+
+  parse-config:
+    needs: set-env
+    runs-on: ubuntu-latest
+    outputs:
+      namespace: ${{ steps.config.outputs.namespace }}
+      postfix: ${{ steps.config.outputs.postfix }}
+      location: ${{ steps.config.outputs.location }}
+      environment: ${{ steps.config.outputs.environment }}
+      enable_aml_computecluster: ${{ steps.config.outputs.enable_aml_computecluster }}
+      enable_monitoring: ${{ steps.config.outputs.enable_monitoring }}
+      terraform_version: ${{ steps.config.outputs.terraform_version }}
+      terraform_st_storage_account: ${{ steps.config.outputs.terraform_st_storage_account }}
+      terraform_st_resource_group: ${{ steps.config.outputs.terraform_st_resource_group }}
+      terraform_st_container_name: ${{ steps.config.outputs.terraform_st_container_name }}
+      terraform_st_key: ${{ steps.config.outputs.terraform_st_key }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Parse config
+        id: config
+        uses: ./.github/actions/parse-config
+        with:
+          config-file: ${{ needs.set-env.outputs.config-file }}
+
+  terraform:
+    needs: [set-env, parse-config]
     runs-on: ubuntu-latest
     steps:
-      - id: deploy-aml-workspace
-        name: deploy-aml-workspace
-        run: echo "OK"
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ needs.parse-config.outputs.terraform_version }}
+
+      - name: Terraform Init
+        working-directory: infrastructure
+        run: |
+          terraform init \
+            -backend-config="storage_account_name=${{ needs.parse-config.outputs.terraform_st_storage_account }}" \
+            -backend-config="resource_group_name=${{ needs.parse-config.outputs.terraform_st_resource_group }}" \
+            -backend-config="container_name=${{ needs.parse-config.outputs.terraform_st_container_name }}" \
+            -backend-config="key=${{ needs.parse-config.outputs.terraform_st_key }}"
+
+      - name: Terraform Plan
+        working-directory: infrastructure
+        env:
+          TF_VAR_location: ${{ needs.parse-config.outputs.location }}
+          TF_VAR_prefix: ${{ needs.parse-config.outputs.namespace }}
+          TF_VAR_environment: ${{ needs.parse-config.outputs.environment }}
+          TF_VAR_postfix: ${{ needs.parse-config.outputs.postfix }}
+          TF_VAR_enable_aml_computecluster: ${{ needs.parse-config.outputs.enable_aml_computecluster }}
+          TF_VAR_enable_monitoring: ${{ needs.parse-config.outputs.enable_monitoring }}
+          TF_VAR_client_secret: ${{ secrets.ARM_CLIENT_SECRET }}
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: infrastructure
+        env:
+          TF_VAR_location: ${{ needs.parse-config.outputs.location }}
+          TF_VAR_prefix: ${{ needs.parse-config.outputs.namespace }}
+          TF_VAR_environment: ${{ needs.parse-config.outputs.environment }}
+          TF_VAR_postfix: ${{ needs.parse-config.outputs.postfix }}
+          TF_VAR_enable_aml_computecluster: ${{ needs.parse-config.outputs.enable_aml_computecluster }}
+          TF_VAR_enable_monitoring: ${{ needs.parse-config.outputs.enable_monitoring }}
+          TF_VAR_client_secret: ${{ secrets.ARM_CLIENT_SECRET }}
+        run: terraform apply -auto-approve tfplan

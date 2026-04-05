@@ -1,0 +1,102 @@
+name: Parse Config
+description: Parses an environment config YAML file and exports all keys as step outputs
+
+inputs:
+  config-file:
+    description: Path to the config YAML file (e.g., config-infra-dev.yml)
+    required: true
+
+outputs:
+  namespace:
+    description: Project namespace
+    value: ${{ steps.parse.outputs.namespace }}
+  postfix:
+    description: Resource postfix
+    value: ${{ steps.parse.outputs.postfix }}
+  location:
+    description: Azure region
+    value: ${{ steps.parse.outputs.location }}
+  environment:
+    description: Target environment (dev or prod)
+    value: ${{ steps.parse.outputs.environment }}
+  enable_aml_computecluster:
+    description: Whether to enable AML compute cluster
+    value: ${{ steps.parse.outputs.enable_aml_computecluster }}
+  enable_monitoring:
+    description: Whether to enable monitoring
+    value: ${{ steps.parse.outputs.enable_monitoring }}
+  resource_group:
+    description: Azure resource group name
+    value: ${{ steps.parse.outputs.resource_group }}
+  aml_workspace:
+    description: Azure ML workspace name
+    value: ${{ steps.parse.outputs.aml_workspace }}
+  application_insights:
+    description: Application Insights resource name
+    value: ${{ steps.parse.outputs.application_insights }}
+  key_vault:
+    description: Key Vault name
+    value: ${{ steps.parse.outputs.key_vault }}
+  container_registry:
+    description: Container Registry name
+    value: ${{ steps.parse.outputs.container_registry }}
+  storage_account:
+    description: Storage Account name
+    value: ${{ steps.parse.outputs.storage_account }}
+  terraform_version:
+    description: Terraform version to install
+    value: ${{ steps.parse.outputs.terraform_version }}
+  terraform_workingdir:
+    description: Terraform working directory
+    value: ${{ steps.parse.outputs.terraform_workingdir }}
+  terraform_st_location:
+    description: Terraform state storage location
+    value: ${{ steps.parse.outputs.terraform_st_location }}
+  terraform_st_resource_group:
+    description: Terraform state resource group
+    value: ${{ steps.parse.outputs.terraform_st_resource_group }}
+  terraform_st_storage_account:
+    description: Terraform state storage account
+    value: ${{ steps.parse.outputs.terraform_st_storage_account }}
+  terraform_st_container_name:
+    description: Terraform state container name
+    value: ${{ steps.parse.outputs.terraform_st_container_name }}
+  terraform_st_key:
+    description: Terraform state key
+    value: ${{ steps.parse.outputs.terraform_st_key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate config file exists
+      shell: bash
+      run: |
+        if [ ! -f "${{ inputs.config-file }}" ]; then
+          echo "::error::Config file not found: ${{ inputs.config-file }}"
+          exit 1
+        fi
+
+    - name: Parse config file
+      id: parse
+      shell: bash
+      run: |
+        CONFIG="${{ inputs.config-file }}"
+        echo "namespace=$(yq '.namespace' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "postfix=$(yq '.postfix' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "location=$(yq '.location' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "environment=$(yq '.environment' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "enable_aml_computecluster=$(yq '.enable_aml_computecluster' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "enable_monitoring=$(yq '.enable_monitoring' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "resource_group=$(yq '.resource_group' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "aml_workspace=$(yq '.aml_workspace' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "application_insights=$(yq '.application_insights' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "key_vault=$(yq '.key_vault' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "container_registry=$(yq '.container_registry' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "storage_account=$(yq '.storage_account' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "terraform_version=$(yq '.terraform_version' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "terraform_workingdir=$(yq '.terraform_workingdir' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "terraform_st_location=$(yq '.terraform_st_location' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "terraform_st_resource_group=$(yq '.terraform_st_resource_group' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "terraform_st_storage_account=$(yq '.terraform_st_storage_account' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "terraform_st_container_name=$(yq '.terraform_st_container_name' "$CONFIG")" >> "$GITHUB_OUTPUT"
+        echo "terraform_st_key=$(yq '.terraform_st_key' "$CONFIG")" >> "$GITHUB_OUTPUT"
